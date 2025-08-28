@@ -58,6 +58,9 @@ use math::{
     ExtensibleField, FieldElement, StarkField, ToElements,
 };
 use tracing::{event, info_span, instrument, Level};
+
+
+use ark_std::{end_timer, start_timer};
 pub use utils::{
     iterators, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
     SliceReader,
@@ -284,7 +287,12 @@ pub trait Prover {
         E: FieldElement<BaseField = Self::BaseField>,
         <Self::Air as Air>::PublicInputs: Send,
     {
+        
+        let proof_timer = start_timer!(|| "Total proof generation");
+        
         // 0 ----- instantiate AIR and prover channel ---------------------------------------------
+        
+        let step_timer = start_timer!(|| "Step 0: AIR and channel setup");
 
         // serialize public inputs; these will be included in the seed for the public coin
         let pub_inputs = self.get_pub_inputs(&trace);
@@ -304,7 +312,12 @@ pub trait Prover {
                 pub_inputs_elements,
             );
 
+        
+        end_timer!(step_timer);
+
         // 1 ----- Commit to the execution trace --------------------------------------------------
+        
+        let step_timer = start_timer!(|| "Step 1: Commit to execution trace");
 
         // build computation domain; this is used later for polynomial evaluations
         let lde_domain_size = air.lde_domain_size();
@@ -365,7 +378,12 @@ pub trait Prover {
         drop(trace);
         drop(aux_trace);
 
+        
+        end_timer!(step_timer);
+
         // 2 ----- evaluate constraints -----------------------------------------------------------
+        
+        let step_timer = start_timer!(|| "Step 2: Evaluate constraints");
         // evaluate constraints specified by the AIR over the constraint evaluation domain, and
         // compute random linear combinations of these evaluations using coefficients drawn from
         // the channel
@@ -378,11 +396,21 @@ pub trait Prover {
         .evaluate(&trace_lde, &domain);
         assert_eq!(composition_poly_trace.num_rows(), ce_domain_size);
 
+        
+        end_timer!(step_timer);
+
         // 3 ----- commit to constraint evaluations -----------------------------------------------
+        
+        let step_timer = start_timer!(|| "Step 3: Commit to constraint evaluations");
         let (constraint_commitment, composition_poly) = maybe_await!(self
             .commit_to_constraint_evaluations(&air, composition_poly_trace, &domain, &mut channel));
 
+        
+        end_timer!(step_timer);
+
         // 4 ----- build DEEP composition polynomial ----------------------------------------------
+        
+        let step_timer = start_timer!(|| "Step 4: Build DEEP composition polynomial");
         let deep_composition_poly = {
             let span = info_span!("build_deep_composition_poly").entered();
             // draw an out-of-domain point z. Depending on the type of E, the point is drawn either
@@ -424,7 +452,12 @@ pub trait Prover {
         // degree minus 1.
         assert_eq!(trace_length - 2, deep_composition_poly.degree());
 
+        
+        end_timer!(step_timer);
+
         // 5 ----- evaluate DEEP composition polynomial over LDE domain ---------------------------
+        
+        let step_timer = start_timer!(|| "Step 5: Evaluate DEEP composition polynomial");
         let deep_evaluations = {
             let span = info_span!("evaluate_deep_composition_poly").entered();
             let deep_evaluations = deep_composition_poly.evaluate(&domain);
@@ -436,14 +469,24 @@ pub trait Prover {
             deep_evaluations
         };
 
+        
+        end_timer!(step_timer);
+
         // 6 ----- compute FRI layers for the composition polynomial ------------------------------
+        
+        let step_timer = start_timer!(|| "Step 6: Compute FRI layers");
         let fri_options = air.options().to_fri_options();
         let num_layers = fri_options.num_fri_layers(lde_domain_size);
         let mut fri_prover = FriProver::<_, _, _, Self::VC>::new(fri_options);
         info_span!("compute_fri_layers", num_layers)
             .in_scope(|| fri_prover.build_layers(&mut channel, deep_evaluations));
 
+        
+        end_timer!(step_timer);
+
         // 7 ----- determine query positions ------------------------------------------------------
+        
+        let step_timer = start_timer!(|| "Step 7: Determine query positions");
         let query_positions = {
             let grinding_factor = air.options().grinding_factor();
             let num_positions = air.options().num_queries();
@@ -461,7 +504,12 @@ pub trait Prover {
             query_positions
         };
 
+        
+        end_timer!(step_timer);
+
         // 8 ----- build proof object -------------------------------------------------------------
+        
+        let step_timer = start_timer!(|| "Step 8: Build proof object");
         let proof = {
             let span = info_span!("build_proof_object").entered();
             // generate FRI proof
@@ -487,6 +535,12 @@ pub trait Prover {
             drop(span);
             proof
         };
+
+        
+        end_timer!(step_timer);
+
+        
+        end_timer!(proof_timer);
 
         Ok(proof)
     }
