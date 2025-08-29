@@ -327,6 +327,8 @@ pub trait Prover {
         assert_eq!(domain.lde_domain_size(), lde_domain_size);
         assert_eq!(domain.trace_length(), trace_length);
 
+        ark_std::println!("lde domain size: {:?}", lde_domain_size);
+
         // commit to the main trace segment
         let (mut trace_lde, mut trace_polys) =
             maybe_await!(self.commit_to_main_trace_segment(&trace, &domain, &mut channel));
